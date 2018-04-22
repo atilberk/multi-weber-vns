@@ -20,8 +20,8 @@ rawdata = readdlm("p654.txt")
 n = rawdata[1,1]
 data = Array{Float64}(rawdata[2:n+1,1:2])
 
-function kmeans(data,k)
-    centroids = findCentroids(data, initlabels(size(data,1), k), k)
+function kmeans(data,k,initcentroids)
+    centroids = initcentroids # != nothing ? initcentroids : findCentroids(data, initlabels(size(data,1), k), k)
     oldCentroids = nothing
     iteration = 0
     while iteration < MAX_ITER && !converged(centroids, oldCentroids)
@@ -34,29 +34,31 @@ function kmeans(data,k)
 end
 
 initlabels(n,k) = rand(1:k, n)
-findCentroids(data, labels, k) = reduce(vcat,[sum(labels.==ki)>0 ? mean(data[labels.==ki,:],1) : rand(2)' for ki in 1:k])
+randomPoint(data)=mean(data,1) .+ (std(data,1).*(rand(2).-0.5)')
+findCentroids(data, labels, k) = reduce(vcat,[sum(labels.==ki)>0 ? mean(data[labels.==ki,:],1) : randomPoint(data) for ki in 1:k])
 findLabels(data, centroids) = begin M = pairwise(Euclidean(),data', centroids'); [indmin(M[i,:]) for i in indices(M,1)] end
 converged(newcent,oldcent) = oldcent != nothing && mean(colwise(Euclidean(), newcent', oldcent')) < CONVERGE_THRESHOLD
 evaluate(data,facilities) = sum(minimum(pairwise(Euclidean(),data', facilities'),2))
 
-function vns(data,numFacility)
+function vns(data,numFacility,initcentroids)
     N = [neighbourhood(numFacility,k) for k in 1:MAX_NEIGHBORHOOD]
-    centroids, oldCentroids = minimum((c->(evaluate(data,c),c)).([kmeans(data,numFacility) for i in 1:INIT_TRIAL]))[2], nothing
+    centroids = initcentroids # != nothing ? initcentroids : minimum((c->(evaluate(data,c),c)).([kmeans(data,numFacility) for i in 1:INIT_TRIAL]))[2]
+    oldCentroids = nothing
     iteration = iteration_wo_improvement = 0
     while iteration < MAX_ITER && iteration_wo_improvement < MAX_PATIENCE
         @show iteration, iteration_wo_improvement = iteration + 1, iteration_wo_improvement + 1
         oldCentroids = centroids
-        println("vn:",evaluate(data,centroids))
+        # println("vn:",evaluate(data,centroids))
         k = 1
         while k <= MAX_NEIGHBORHOOD
             newCentroids = getSomeSolution(data,centroids,N[k])
             if improved(data, newCentroids, centroids)
-                println("v$k:", evaluate(data,newCentroids))
+                # println("v$k:", evaluate(data,newCentroids))
                 centroids = newCentroids
                 k = 1
                 iteration_wo_improvement = 0
             else
-                println("no better :(")
+                # println("no better :(")
                 k = k + 1
             end
         end
@@ -78,12 +80,24 @@ function localSearch(data,labels,numFacility)
         N = allLocalNeigbours(labels,numFacility)
         bestNeighbour = N[indmin((l->evaluate(data,findCentroids(data,l,numFacility))).(N))]
         if improved(data, findCentroids(data,bestNeighbour,numFacility), findCentroids(data,labels,numFacility))
-            newCentroids = findCentroids(data,bestNeighbour,numFacility)
-            println("ls:",evaluate(data,newCentroids))
+            # newCentroids = findCentroids(data,bestNeighbour,numFacility)
+            # println("ls:",evaluate(data,newCentroids))
             labels = bestNeighbour
-        else
-            println("local minima!")
+        # else
+        #     println("local minima!")
         end
+        #=
+        for neighbour in N
+            if improved(data, findCentroids(data,neighbour,numFacility), findCentroids(data,labels,numFacility))
+                newCentroids = findCentroids(data,neighbour,numFacility)
+                println(" ls:",evaluate(data,newCentroids))
+                labels = neighbour
+                break
+            # else
+            #     println("local minima!")
+            end
+        end
+        =#
     end
     labels
 end
