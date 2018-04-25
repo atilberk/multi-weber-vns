@@ -1,16 +1,16 @@
 using Distances
 
-function kmeans(data,k,initcentroids)
-    centroids = initcentroids # != nothing ? initcentroids : findCentroids(data, initlabels(size(data,1), k), k)
-    oldCentroids = nothing
+function kmeans(data,k,initlabels)
+    labels = initlabels # != nothing ? initcentroids : findCentroids(data, initlabels(size(data,1), k), k)
+    oldlabels = nothing
     iteration = 0
-    while iteration < MAX_ITER && !converged(centroids, oldCentroids)
+    while iteration < MAX_ITER && labels != oldlabels #!converged(findCentroids(centroids, oldCentroids)
         iteration = iteration + 1
-        oldCentroids = centroids
-        labels = findLabels(data, centroids)
+        oldlabels = labels
         centroids = findCentroids(data, labels, k)
+        labels = findLabels(data, centroids)
     end
-    centroids
+    labels
 end
 
 initlabels(n,k) = rand(1:k, n)
@@ -20,20 +20,22 @@ findLabels(data, centroids) = begin M = pairwise(Euclidean(),data', centroids');
 converged(newcent,oldcent) = oldcent != nothing && mean(colwise(Euclidean(), newcent', oldcent')) < CONVERGE_THRESHOLD
 evaluate(data,facilities) = sum(minimum(pairwise(Euclidean(),data', facilities'),2))
 
-function vns(data,numFacility,initcentroids)
+function vns(data,numFacility,initlabels)
     N = [neighbourhood(numFacility,k) for k in 1:MAX_NEIGHBORHOOD]
-    centroids = initcentroids # != nothing ? initcentroids : minimum((c->(evaluate(data,c),c)).([kmeans(data,numFacility) for i in 1:INIT_TRIAL]))[2]
-    oldCentroids = nothing
+    #centroids = initcentroids # != nothing ? initcentroids : minimum((c->(evaluate(data,c),c)).([kmeans(data,numFacility) for i in 1:INIT_TRIAL]))[2]
+    labels = initlabels
+    oldlabels = nothing
     iteration = iteration_wo_improvement = 0
     while iteration < MAX_ITER && iteration_wo_improvement < MAX_PATIENCE
-        iteration, iteration_wo_improvement = iteration + 1, iteration_wo_improvement + 1
-        oldCentroids = centroids
+        @show iteration, iteration_wo_improvement = iteration + 1, iteration_wo_improvement + 1
+        oldlabels = labels
         #println(evaluate(data,centroids))
         k = 1
         while k <= MAX_NEIGHBORHOOD
-            newCentroids = getSomeSolution(data,centroids,N[k])
-            if improved(data, newCentroids, centroids)
-                centroids = newCentroids
+            newlabels = getSomeSolution(data,labels,N[k],numFacility)
+            if improved(data, findCentroids(data, newlabels, numFacility), findCentroids(data, labels, numFacility))
+                labels=newlabels
+                println("HERE")
                 break
             else
                 k = k + 1
@@ -44,28 +46,30 @@ function vns(data,numFacility,initcentroids)
         end
         append!(KVALUES, k)
     end
-    centroids
+    labels
 end
 
-getSomeSolution(d,c,p) = begin l = p(findLabels(d,c)); l = MODE==:Basic?localSearch(d,l,size(c,1)):l; findCentroids(d, l, size(c,1)); end
+getSomeSolution(d,ll,p,n) = begin l = p(ll); l = MODE==:Basic?localSearch(d,l,n):l; end
 neighbourhood(n,k) = ll->begin l = copy(ll); s = randperm(length(l))[1:k]; l[s] = reassign(l[s],n); l; end
 reassign(seq,n) = begin c = rand(1:n,length(seq)); reduce(|,(c .== seq))?reassign(seq,n):c; end
 improved(d,nc,oc) = evaluate(d,nc) < evaluate(d,oc)
 
 function localSearch(data,labels,numFacility)
-    oldLabels = nothing
+    oldlabels = nothing
     iteration = 0
     centroids = findCentroids(data,labels,numFacility)
-    while iteration < MAX_ITER && labels != oldLabels
+    while iteration < MAX_ITER && labels != oldlabels
         iteration = iteration + 1
-        oldLabels = labels
+        oldlabels = labels
         N = allLocalNeigbours(labels,numFacility)
         bestNeighbour = N[indmin((l->evaluate(data,findCentroids(data,l,numFacility))).(N))]
         bestCentroids=findCentroids(data,bestNeighbour,numFacility)
         if improved(data, bestCentroids, centroids)
             labels = bestNeighbour
             centroids = bestCentroids
-            #println(evaluate(data,centroids))
+            println(evaluate(data,centroids))
+        else
+            println("local optimum!")
         end
     end
     labels
@@ -77,7 +81,7 @@ allLocalNeigbours(l,n)= filter(ll->ll!=l,[[l[1:i-1];j;l[i+1:end]] for j in 1:n, 
 Base.isless(a::Array,b::Array)=true
 
 # Maximum number of iterations
-MAX_ITER = 10
+MAX_ITER = 200
 # Maximum number of iterations without improvement
 MAX_PATIENCE = 3
 # minimum euclidean distance for convergence
@@ -104,12 +108,12 @@ function main(numFacilities=[3,5,8], numTrials=5)
     for nf in numFacilities
         for i in 1:numTrials
             global KVALUES=[]
-            il=initlabels(nf,size(data,1))
-            ic=findCentroids(data,il,nf)
+            il=initlabels(size(data,1),nf)
+            #ic=findCentroids(data,il,nf)
             t0=time()
-            reskms=evaluate(data,kmeans(data,nf,ic))
+            reskms=evaluate(data,findCentroids(data,kmeans(data,nf,il),nf))
             t1=time()
-            resvns=evaluate(data,vns(data,nf,ic))
+            resvns=evaluate(data,findCentroids(data,vns(data,nf,il),nf))
             t2=time()
             println("$nf\t$i\t$reskms\t$(@sprintf("%.3f",1000*(t1-t0))) ms\t$resvns\t$(@sprintf("%.3f",t2-t1)) s")
             append!(KARRAY,[KVALUES])
